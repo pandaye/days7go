@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"gee"
 	"log"
 	"net/http"
@@ -9,15 +8,20 @@ import (
 
 func main() {
 	e := gee.New()
-	e.GET("/", func(writer http.ResponseWriter, request *http.Request) {
-		log.Printf("GET /")
-		fmt.Fprintf(writer, "hello gee!")
+	e.GET("/", func(ctx *gee.Context) {
+		log.Println("GET /")
+		ctx.HTML(http.StatusOK, "<h1>Hello Gee!</h1>")
 	})
-	e.GET("/header", func(writer http.ResponseWriter, request *http.Request) {
-		log.Printf("GET /header")
-		for k, v := range request.Header {
-			fmt.Fprintf(writer, "header[%q] = %q]\n", k, v)
-		}
+	e.POST("/json", func(ctx *gee.Context) {
+		log.Println("POST /json")
+		ctx.JSON(http.StatusOK, gee.H{
+			"username": ctx.PostForm("username"),
+			"password": ctx.PostForm("password"),
+		})
+	})
+	e.GET("/query", func(ctx *gee.Context) {
+		log.Println("GET /query")
+		ctx.String(http.StatusOK, "hello %s\n", ctx.Query("user"))
 	})
 	addr := ":9999"
 	log.Fatal(e.Run(addr))
