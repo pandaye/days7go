@@ -17,11 +17,11 @@ func (e *Engine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (e *Engine) GET(pattern string, f HandlerFunc) {
-	e.router.addRouter("GET", pattern, f)
+	e.router.addRoute("GET", pattern, f)
 }
 
 func (e *Engine) POST(pattern string, f HandlerFunc) {
-	e.router.addRouter("POST", pattern, f)
+	e.router.addRoute("POST", pattern, f)
 }
 
 func (e *Engine) Run(addr string) error {

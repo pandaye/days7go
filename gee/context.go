@@ -15,8 +15,14 @@ type Context struct {
 
 	Method string
 	Path   string
+	Params map[string]string
 
 	StatusCode int
+}
+
+func (c *Context) Param(key string) string {
+	value := c.Params[key]
+	return value
 }
 
 func (c *Context) Status(code int) {

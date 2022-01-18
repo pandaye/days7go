@@ -2,27 +2,28 @@ package main
 
 import (
 	"gee"
-	"log"
 	"net/http"
 )
 
 func main() {
-	e := gee.New()
-	e.GET("/", func(ctx *gee.Context) {
-		log.Println("GET /")
-		ctx.HTML(http.StatusOK, "<h1>Hello Gee!</h1>")
+	r := gee.New()
+	r.GET("/", func(c *gee.Context) {
+		c.HTML(http.StatusOK, "<h1>Hello Gee</h1>")
 	})
-	e.POST("/json", func(ctx *gee.Context) {
-		log.Println("POST /json")
-		ctx.JSON(http.StatusOK, gee.H{
-			"username": ctx.PostForm("username"),
-			"password": ctx.PostForm("password"),
-		})
+
+	r.GET("/hello", func(c *gee.Context) {
+		// expect /hello?name=geektutu
+		c.String(http.StatusOK, "hello %s, you're at %s\n", c.Query("name"), c.Path)
 	})
-	e.GET("/query", func(ctx *gee.Context) {
-		log.Println("GET /query")
-		ctx.String(http.StatusOK, "hello %s\n", ctx.Query("user"))
+
+	r.GET("/hello/:name", func(c *gee.Context) {
+		// expect /hello/geektutu
+		c.String(http.StatusOK, "hello %s, you're at %s\n", c.Param("name"), c.Path)
 	})
-	addr := ":9999"
-	log.Fatal(e.Run(addr))
+
+	r.GET("/assets/*filepath", func(c *gee.Context) {
+		c.JSON(http.StatusOK, gee.H{"filepath": c.Param("filepath")})
+	})
+
+	r.Run(":9999")
 }
