@@ -48,11 +48,14 @@ func (n *node) insert(parts []string) *node {
 		}
 	}
 	m.pattern = "/" + strings.Join(parts, "/")
+	if m.pattern == "/" {
+	}
 	return m
 }
 
 func (n *node) search(parts []string) *node {
-	if len(parts) == 0 {
+	// 如果没有插入 / 则 root.pattern 为空，此时查询 / 应返回 nil
+	if len(parts) == 0 && n.pattern == "/" {
 		return n
 	}
 	// 广度优先搜索
@@ -107,8 +110,8 @@ func parsePattern(pattern string) []string {
 func (r *router) addRoute(method, pattern string, f HandlerFunc) {
 	if _, ok := r.roots[method]; !ok {
 		r.roots[method] = &node{
-			pattern:  "/",
-			part:     "/",
+			pattern:  "",
+			part:     "/", // 这个其实无所谓
 			children: make([]*node, 0),
 			isWaild:  false,
 		}
@@ -148,8 +151,11 @@ func (r *router) handle(ctx *Context) {
 	if keyNode != nil {
 		ctx.Params = params
 		handler := r.handler[ctx.Method+"-"+keyNode.pattern]
-		handler(ctx)
+		ctx.handlers = append(ctx.handlers, handler)
 	} else {
-		ctx.String(http.StatusNotFound, "Page %v Not Found!", ctx.Path)
+		ctx.handlers = append(ctx.handlers, func(ctx *Context) {
+			ctx.String(http.StatusNotFound, "Page %v Not Found!", ctx.Path)
+		})
 	}
+	ctx.Next()
 }

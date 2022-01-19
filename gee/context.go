@@ -18,6 +18,17 @@ type Context struct {
 	Params map[string]string
 
 	StatusCode int
+
+	handlers []HandlerFunc
+	index    int
+}
+
+func (c *Context) Next() {
+	c.index++
+	// middleware 应该要求一定包含 Next（），并且 handler 在最后，所以此处不必循环
+	if c.index < len(c.handlers) {
+		c.handlers[c.index](c)
+	}
 }
 
 func (c *Context) Param(key string) string {
@@ -68,11 +79,17 @@ func (c *Context) JSON(code int, v interface{}) {
 	}
 }
 
+func (c *Context) Fail(code int, err string) {
+	c.String(code, err)
+}
+
 func newContext(resp http.ResponseWriter, req *http.Request) *Context {
 	return &Context{
 		Response: resp,
 		Request:  req,
 		Path:     req.URL.Path,
 		Method:   req.Method,
+		handlers: make([]HandlerFunc, 0),
+		index:    -1,
 	}
 }
