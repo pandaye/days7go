@@ -44,7 +44,7 @@ func TestParsePattern(t *testing.T) {
 func TestAddRoute(t *testing.T) {
 	r := newTestRouter()
 	if _, ok := r.roots["GET"]; !ok {
-		t.Fatal("router not init successfully")
+		t.Fatal("route add failed")
 	}
 }
 

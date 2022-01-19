@@ -21,6 +21,8 @@ type Context struct {
 
 	handlers []HandlerFunc
 	index    int
+
+	engine *Engine
 }
 
 func (c *Context) Next() {
@@ -57,12 +59,15 @@ func (c *Context) Data(code int, data []byte) {
 	c.Response.Write(data)
 }
 
-func (c *Context) HTML(code int, html string) {
+func (c *Context) HTML(code int, templateName string, data interface{}) {
 	c.SetHeader("Content-Type", "text/html")
 	c.Status(code)
-	c.Response.Write([]byte(html))
+	if err := c.engine.htmlTemplates.ExecuteTemplate(c.Response, templateName, data); err != nil {
+		panic("HTML render failed")
+	}
 }
 
+// String 方法不会使输出 %v 时也调用此函数，因为接口方法签名不一致
 func (c *Context) String(code int, format string, v ...interface{}) {
 	c.SetHeader("Content-Type", "text/plain")
 	c.Status(code)
