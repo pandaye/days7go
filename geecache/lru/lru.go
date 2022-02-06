@@ -41,6 +41,7 @@ func (c *Cache) RemoveOldest() {
 	ele := c.ll.Back() // 这里要判空，因为可能已经删没了？ 嗯？ 怎么会删没？ 缓存是什么
 	if ele != nil {
 		c.ll.Remove(ele)
+		// 此处的 Value 是一个空接口， 此 Value 非彼 Value
 		kv := ele.Value.(*entry)
 		delete(c.cache, kv.key)
 		// 还需要改变当前缓存容量
