@@ -36,7 +36,7 @@ func NewGroup(getter Getter, name string, size int64) *Group {
 }
 
 func GetGroup(name string) *Group {
-	m.RLocker()
+	m.RLock()
 	defer m.RUnlock()
 	if g, ok := groups[name]; ok {
 		return g
