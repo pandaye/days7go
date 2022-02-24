@@ -2,6 +2,7 @@ package geecache
 
 import (
 	"fmt"
+	"geecache/singleflight"
 	"log"
 	"sync"
 )
@@ -11,6 +12,7 @@ type Group struct {
 	getter    Getter
 	mainCache cache
 	peer      PeerPicker
+	loader    *singleflight.Group
 }
 
 var (
@@ -31,6 +33,7 @@ func NewGroup(getter Getter, name string, size int64) *Group {
 		name:      name,
 		getter:    getter,
 		mainCache: newCache(size),
+		loader:    &singleflight.Group{},
 	}
 	groups[name] = g
 	return g
@@ -65,15 +68,21 @@ func (g *Group) RegisterPeer(peer PeerPicker) {
 	g.peer = peer
 }
 
-func (g *Group) load(key string) (ByteView, error) {
-	if g.peer != nil {
-		if peer, ok := g.peer.PickPeer(key); ok {
-			if value, err := g.getFromPeers(peer, key); err == nil {
-				return value, err
+func (g *Group) load(key string) (bv ByteView, err error) {
+	value, err := g.loader.Do(key, func() (interface{}, error) {
+		if g.peer != nil {
+			if peer, ok := g.peer.PickPeer(key); ok {
+				if value, err := g.getFromPeers(peer, key); err == nil {
+					return value, err
+				}
 			}
 		}
+		return g.loadLocally(key)
+	})
+	if err == nil {
+		return value.(ByteView), err
 	}
-	return g.loadLocally(key)
+	return
 }
 
 func (g *Group) getFromPeers(peer PeerGetter, key string) (ByteView, error) {
