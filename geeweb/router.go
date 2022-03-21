@@ -1,4 +1,4 @@
-package gee
+package geeweb
 
 import (
 	"net/http"
