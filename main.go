@@ -1,12 +1,11 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"geerpc"
-	"geerpc/codec"
 	"log"
 	"net"
+	"sync"
 	"time"
 )
 
@@ -24,33 +23,25 @@ func main() {
 	addr := make(chan string)
 	go startServer(addr)
 
-	conn, err := net.Dial("tcp", <-addr)
-	defer func() { _ = conn.Close() }()
-	if err != nil {
-		log.Fatalln("Connect to server fatal: ", err)
-	}
+	client, _ := geerpc.Dial("tcp", <-addr)
+	defer func() {
+		log.Println("Close client")
+		_ = client.Close()
+	}()
 
 	time.Sleep(time.Second)
-	option := geerpc.DefaultOption
-
-	err = json.NewEncoder(conn).Encode(option)
-	if err != nil {
-		log.Fatalln("encode error")
+	var wg sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			args := fmt.Sprintf("geerpc req %d", i)
+			var reply string
+			if err := client.Call("Foo.Sum", args, &reply); err != nil {
+				log.Fatal("call Foo.Sum error:", err)
+			}
+			log.Println("reply:", reply)
+		}(i)
 	}
-
-	cc := codec.NewGobCodec(conn)
-	for i := 0; i < 5; i++ {
-		req := &codec.Header{
-			ServiceMethod: "Foo.Sum",
-			Seq:           uint64(i),
-		}
-		err = cc.Write(req, fmt.Sprintf("geerpc req %d", req.Seq))
-		if err != nil {
-			log.Fatalln("Send Request Error! ")
-		}
-		_ = cc.ReadHeader(req)
-		var replyv string
-		_ = cc.ReadBody(&replyv)
-		log.Println("reply:", replyv)
-	}
+	wg.Wait()
 }
