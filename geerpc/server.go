@@ -2,12 +2,13 @@ package geerpc
 
 import (
 	"encoding/json"
-	"fmt"
+	"errors"
 	"geerpc/codec"
 	"io"
 	"log"
 	"net"
 	"reflect"
+	"strings"
 	"sync"
 )
 
@@ -26,11 +27,15 @@ var DefaultOption = &Option{
 // invalidRequest is a placeholder for response argv when error occurs
 var invalidRequest = struct{}{}
 
-type Server struct{}
+type Server struct {
+	serviceMap sync.Map
+}
 
 type request struct {
 	h            *codec.Header // header of request
 	argv, replyv reflect.Value // argv and replyv of request
+	svc          *service
+	mtype        *methodType
 }
 
 func NewServer() *Server {
@@ -38,6 +43,34 @@ func NewServer() *Server {
 }
 
 var DefaultServer = NewServer()
+
+func (s *Server) Register(rcvr interface{}) error {
+	svc := newService(rcvr)
+	if _, dup := s.serviceMap.LoadOrStore(svc.name, svc); dup {
+		return errors.New("rpc: service already defined: " + svc.name)
+	}
+	return nil
+}
+
+func (s *Server) findService(serviceMethod string) (svc *service, mType *methodType, err error) {
+	dot := strings.LastIndex(serviceMethod, ".")
+	if dot < 0 {
+		err = errors.New("rpc server: service/method request ill-formed: " + serviceMethod)
+		return
+	}
+	serviceName, methodName := serviceMethod[:dot], serviceMethod[dot+1:]
+	svci, ok := s.serviceMap.Load(serviceName)
+	if !ok {
+		err = errors.New("rpc server: can't find service " + serviceName)
+		return
+	}
+	svc = svci.(*service)
+	mType = svc.method[methodName]
+	if mType == nil {
+		err = errors.New("rpc server: can't find method " + methodName)
+	}
+	return
+}
 
 func (s *Server) Accept(lis net.Listener) {
 	log.Println("Accepting...")
@@ -103,9 +136,15 @@ func (s *Server) sendResponse(c codec.Codec, header *codec.Header, resp interfac
 func (s *Server) handleRequest(c codec.Codec, req *request, wg *sync.WaitGroup, sending *sync.Mutex) {
 	defer wg.Done()
 
-	req.replyv = req.argv
-	log.Println(req.h, req.argv.Elem())
-	req.replyv = reflect.ValueOf(fmt.Sprintf("geerpc resp %d", req.h.Seq))
+	// log.Println(req.h, req.argv.Elem())
+
+	err := req.svc.call(req.mtype, req.argv, req.replyv)
+	if err != nil {
+		req.h.Error = err.Error()
+		s.sendResponse(c, req.h, invalidRequest, sending)
+		return
+	}
+
 	s.sendResponse(c, req.h, req.replyv.Interface(), sending)
 }
 
@@ -119,8 +158,18 @@ func (s *Server) readRequest(c codec.Codec) (req *request, err error) {
 		return nil, err
 	}
 	req = &request{h: &h}
-	req.argv = reflect.New(reflect.TypeOf("")) // new(string)， 后面用 v 可以吗？
-	if err = c.ReadBody(req.argv.Interface()); err != nil {
+	req.svc, req.mtype, err = s.findService(h.ServiceMethod)
+	if err != nil {
+		return nil, err
+	}
+	req.argv = req.mtype.newArgv()
+	req.replyv = req.mtype.newReplyv()
+
+	argvi := req.argv.Interface()
+	if req.argv.Type().Kind() != reflect.Ptr {
+		argvi = req.argv.Addr().Interface()
+	}
+	if err = c.ReadBody(argvi); err != nil {
 		log.Println("rpc server: read argv err:", err)
 	}
 	return req, nil
@@ -134,3 +183,5 @@ func (s *Server) readRequestHeader(c codec.Codec) (h *codec.Header, err error) {
 func Accept(lis net.Listener) {
 	DefaultServer.Accept(lis)
 }
+
+func Register(rcvr interface{}) error { return DefaultServer.Register(rcvr) }
