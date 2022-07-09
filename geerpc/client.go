@@ -1,6 +1,7 @@
 package geerpc
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"log"
 	"net"
 	"sync"
+	"time"
 )
 
 type Client struct {
@@ -74,7 +76,7 @@ func (client *Client) receive() {
 		call := client.removeCall(header.Seq)
 		switch {
 		case call == nil:
-			err = call.Error
+			err = client.cc.ReadBody(nil)
 		case header.Error != "":
 			call.Error = fmt.Errorf(header.Error)
 			err = call.Error
@@ -137,10 +139,18 @@ func (client *Client) Do(method string, args, reply interface{}, done chan *Call
 	return call
 }
 
-func (client *Client) Call(method string, args, reply interface{}) error {
-	call := <-client.Do(method, args, reply, nil).Done
-	return call.Error
+func (client *Client) Call(ctx context.Context, method string, args, reply interface{}) error {
+	call := client.Do(method, args, reply, nil)
+	select {
+	case <-ctx.Done():
+		client.removeCall(call.Seq)
+		return errors.New("rpc client: call failed: " + ctx.Err().Error())
+	case call := <-call.Done:
+		return call.Error
+	}
 }
+
+type newClientFunc func(conn net.Conn, opt *Option) (*Client, error)
 
 func newClient(conn net.Conn, opt *Option) (*Client, error) {
 	// 发送 option
@@ -159,21 +169,45 @@ func newClient(conn net.Conn, opt *Option) (*Client, error) {
 	return client, nil
 }
 
-func Dial(network, address string, opts ...*Option) (client *Client, err error) {
+type clientResult struct {
+	client *Client
+	err    error
+}
+
+func dialTimeout(newClient newClientFunc, network, address string, opts ...*Option) (client *Client, err error) {
 	opt, err := parseOption(opts...)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
-	conn, err := net.Dial(network, address)
+	conn, err := net.DialTimeout(network, address, opt.ConnectTimeout)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 	defer func() {
-		if client == nil {
+		if err != nil {
 			_ = conn.Close()
 		}
 	}()
-	return newClient(conn, opt)
+	ch := make(chan clientResult)
+	go func() {
+		client, err := newClient(conn, opt)
+		ch <- clientResult{client, err}
+	}()
+	// 允许无限等待，直接阻塞接受 ch
+	if opt.ConnectTimeout == 0 {
+		result := <-ch
+		return result.client, result.err
+	}
+	select {
+	case <-time.After(opt.ConnectTimeout):
+		return nil, fmt.Errorf("rpc client: connect timeout: expect within %s", opt.ConnectTimeout)
+	case result := <-ch:
+		return result.client, result.err
+	}
+}
+
+func Dial(network, address string, opts ...*Option) (client *Client, err error) {
+	return dialTimeout(newClient, network, address, opts...)
 }
 
 func parseOption(opts ...*Option) (*Option, error) {

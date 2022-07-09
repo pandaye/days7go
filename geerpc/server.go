@@ -3,6 +3,7 @@ package geerpc
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"geerpc/codec"
 	"io"
 	"log"
@@ -10,18 +11,22 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"time"
 )
 
 const MagicNumber = 0x3bef5c
 
 type Option struct {
-	MagicNumber int        // MagicNumber marks this's a geerpc request
-	CodecType   codec.Type // client may choose different Codec to encode body
+	MagicNumber    int        // MagicNumber marks this a geerpc request
+	CodecType      codec.Type // client may choose different Codec to encode body
+	ConnectTimeout time.Duration
+	HandleTimeout  time.Duration
 }
 
 var DefaultOption = &Option{
-	MagicNumber: MagicNumber,
-	CodecType:   codec.GobType,
+	MagicNumber:    MagicNumber,
+	CodecType:      codec.GobType,
+	ConnectTimeout: 5 * time.Second,
 }
 
 // invalidRequest is a placeholder for response argv when error occurs
@@ -100,10 +105,10 @@ func (s *Server) ServeConn(conn io.ReadWriteCloser) {
 		log.Println("No Codec Found")
 		return
 	}
-	go s.serveCodec(f(conn))
+	go s.serveCodec(f(conn), opt.HandleTimeout)
 }
 
-func (s *Server) serveCodec(c codec.Codec) {
+func (s *Server) serveCodec(c codec.Codec, timeout time.Duration) {
 	sending := new(sync.Mutex)
 	wg := new(sync.WaitGroup)
 	for {
@@ -117,7 +122,7 @@ func (s *Server) serveCodec(c codec.Codec) {
 			break
 		}
 		wg.Add(1)
-		go s.handleRequest(c, req, wg, sending)
+		go s.handleRequest(c, req, wg, sending, timeout)
 	}
 	wg.Wait()
 	return
@@ -133,19 +138,33 @@ func (s *Server) sendResponse(c codec.Codec, header *codec.Header, resp interfac
 	}
 }
 
-func (s *Server) handleRequest(c codec.Codec, req *request, wg *sync.WaitGroup, sending *sync.Mutex) {
+func (s *Server) handleRequest(c codec.Codec, req *request, wg *sync.WaitGroup, sending *sync.Mutex, timeout time.Duration) {
 	defer wg.Done()
-
-	// log.Println(req.h, req.argv.Elem())
-
-	err := req.svc.call(req.mtype, req.argv, req.replyv)
-	if err != nil {
-		req.h.Error = err.Error()
-		s.sendResponse(c, req.h, invalidRequest, sending)
-		return
+	called := make(chan struct{})
+	sent := make(chan struct{})
+	go func() {
+		err := req.svc.call(req.mtype, req.argv, req.replyv)
+		close(called)
+		if err != nil {
+			req.h.Error = err.Error()
+			s.sendResponse(c, req.h, invalidRequest, sending)
+			close(sent)
+			return
+		}
+		s.sendResponse(c, req.h, req.replyv.Interface(), sending)
+		close(sent)
+	}()
+	if timeout == 0 {
+		<-called
+		<-sent
 	}
-
-	s.sendResponse(c, req.h, req.replyv.Interface(), sending)
+	select {
+	case <-called:
+		<-sent
+	case <-time.After(timeout):
+		req.h.Error = fmt.Sprintf("rpc server: request handle timeout: expect within %s", timeout)
+		s.sendResponse(c, req.h, invalidRequest, sending)
+	}
 }
 
 func (s *Server) readRequest(c codec.Codec) (req *request, err error) {

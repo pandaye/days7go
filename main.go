@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"geerpc"
 	"log"
 	"net"
@@ -43,6 +44,7 @@ func main() {
 	}()
 
 	time.Sleep(time.Second)
+	ctx := context.TODO()
 	var wg sync.WaitGroup
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
@@ -50,7 +52,8 @@ func main() {
 			defer wg.Done()
 			args := Args{Num1: i, Num2: i * i}
 			var reply int
-			if err := client.Call("Foo.Sum", args, &reply); err != nil {
+			timeCtx, _ := context.WithTimeout(ctx, 300*time.Millisecond)
+			if err := client.Call(timeCtx, "Foo.Sum", args, &reply); err != nil {
 				log.Fatal("call Foo.Sum error:", err)
 			}
 			log.Printf("%d + %d = %d", args.Num1, args.Num2, reply)
