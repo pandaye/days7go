@@ -11,7 +11,7 @@ type methodType struct {
 	method    reflect.Method
 	ArgType   reflect.Type
 	ReplyType reflect.Type
-	numCalls  uint64
+	NumCalls  uint64
 }
 
 func (m *methodType) newArgv() reflect.Value {
@@ -79,7 +79,7 @@ func (s *service) registerMethods() {
 }
 
 func (s *service) call(m *methodType, argv, replyv reflect.Value) error {
-	atomic.AddUint64(&m.numCalls, 1)
+	atomic.AddUint64(&m.NumCalls, 1)
 	f := m.method.Func
 	returnValues := f.Call([]reflect.Value{s.rcvr, argv, replyv})
 	if errInter := returnValues[0].Interface(); errInter != nil {

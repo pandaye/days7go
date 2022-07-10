@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"net/http"
 	"reflect"
 	"strings"
 	"sync"
@@ -28,6 +29,12 @@ var DefaultOption = &Option{
 	CodecType:      codec.GobType,
 	ConnectTimeout: 5 * time.Second,
 }
+
+const (
+	connected        = "200 Connected to Gee RPC"
+	defaultRPCPath   = "/_rpc"
+	defaultDebugPath = "/debug/rpc"
+)
 
 // invalidRequest is a placeholder for response argv when error occurs
 var invalidRequest = struct{}{}
@@ -88,6 +95,32 @@ func (s *Server) Accept(lis net.Listener) {
 		log.Println("Get connected")
 		go s.ServeConn(conn)
 	}
+}
+
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "CONNECT" {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		_, _ = io.WriteString(w, "405 must CONNECT\n")
+		return
+	}
+	conn, _, err := w.(http.Hijacker).Hijack()
+	if err != nil {
+		log.Print("rpc hijacking", r.RemoteAddr, ": ", err.Error())
+		return
+	}
+	_, _ = io.WriteString(conn, "HTTP/1.0 "+connected+"\n\n")
+	s.ServeConn(conn)
+}
+
+func (s *Server) HandleHTTP() {
+	http.Handle(defaultRPCPath, s)
+	http.Handle(defaultDebugPath, debugHTTP{s})
+	log.Println("rpc server debug path:", defaultDebugPath)
+}
+
+func HandleHTTP() {
+	DefaultServer.HandleHTTP()
 }
 
 func (s *Server) ServeConn(conn io.ReadWriteCloser) {

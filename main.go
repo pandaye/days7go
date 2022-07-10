@@ -5,6 +5,7 @@ import (
 	"geerpc"
 	"log"
 	"net"
+	"net/http"
 	"sync"
 	"time"
 )
@@ -23,21 +24,19 @@ func startServer(addr chan string) {
 	if err := geerpc.Register(&foo); err != nil {
 		log.Fatal("register error:", err)
 	}
-	l, err := net.Listen("tcp", ":0")
+	l, err := net.Listen("tcp", ":9999")
 	if err != nil {
 		log.Fatalln("server start error: ", err)
 	}
 	log.Println("listen: ", l.Addr().String())
 	addr <- l.Addr().String()
-	geerpc.Accept(l)
+	geerpc.HandleHTTP()
+	// ?
+	_ = http.Serve(l, nil)
 }
 
-func main() {
-	log.SetFlags(0)
-	addr := make(chan string)
-	go startServer(addr)
-
-	client, _ := geerpc.Dial("tcp", <-addr)
+func call(addr chan string) {
+	client, _ := geerpc.DialHTTP("tcp", <-addr)
 	defer func() {
 		log.Println("Close client")
 		_ = client.Close()
@@ -60,4 +59,11 @@ func main() {
 		}(i)
 	}
 	wg.Wait()
+}
+
+func main() {
+	log.SetFlags(0)
+	addr := make(chan string)
+	go call(addr)
+	startServer(addr)
 }
