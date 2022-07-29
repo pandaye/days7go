@@ -3,6 +3,8 @@ package geecache
 import (
 	"fmt"
 	"geecache/consistenthash"
+	pb "geecache/geecachepb"
+	"google.golang.org/protobuf/proto"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -16,38 +18,39 @@ type PeerPicker interface {
 }
 
 type PeerGetter interface {
-	Get(group string, key string) ([]byte, error)
+	Get(in *pb.Request, out *pb.Response) error
 }
 
 type HttpGetter struct {
 	basePath string //
 }
 
-func (h *HttpGetter) Get(group string, key string) ([]byte, error) {
+func (h *HttpGetter) Get(in *pb.Request, out *pb.Response) error {
 	if !strings.HasSuffix(h.basePath, "/") {
 		h.basePath += "/"
 	}
 	u := fmt.Sprintf(
 		"%v%v/%v",
 		h.basePath,
-		url.QueryEscape(group),
-		url.QueryEscape(key))
+		url.QueryEscape(in.GetGroup()),
+		url.QueryEscape(in.GetKey()))
 	resp, err := http.Get(u)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("server returned: %v", resp.Status)
+		return fmt.Errorf("server returned: %v", resp.Status)
 	}
 
-	data, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("reading response body: %v", err)
+	res, err := ioutil.ReadAll(resp.Body)
+
+	if err = proto.Unmarshal(res, out); err != nil {
+		return fmt.Errorf("reading response body: %v", err)
 	}
 
-	return data, nil
+	return nil
 }
 
 type HttpPool struct {
@@ -121,6 +124,7 @@ func (s *HttpPool) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	body, err := proto.Marshal(&pb.Response{Value: data.ByteSlice()})
 	w.Header().Set("Content-Type", "application/octet-stream")
-	w.Write(data.ByteSlice())
+	w.Write(body)
 }
