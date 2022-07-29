@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 	"geerpc"
+	"geerpc/registry"
 	"geerpc/xclient"
 	"log"
 	"net"
+	"net/http"
 	"sync"
 	"time"
 )
@@ -25,22 +27,37 @@ func (f Foo) Sleep(args Args, reply *int) error {
 	return nil
 }
 
-func startServer(addr chan string) {
-	var foo Foo
-	l, err := net.Listen("tcp", ":0")
+func startRegistry(wg *sync.WaitGroup) {
+	l, err := net.Listen("tcp", ":9999")
+	log.Println("done start registry", l.Addr().String(), "listening...")
 	if err != nil {
-		log.Fatalln("server start error: ", err)
+		panic(err)
 	}
+	registry.HandleHTTP()
+	wg.Done()
+
+	// 这里直接用 http 的原因是 http 自带的 ServerMux handler
+	_ = http.Serve(l, nil)
+}
+
+func startServer(registryAddr string, wg *sync.WaitGroup) {
+	var foo Foo
 	server := geerpc.NewServer()
 	if err := server.Register(&foo); err != nil {
 		log.Fatal("register error:", err)
 	}
+
+	// 创建监听 socket
+	l, err := net.Listen("tcp", ":0")
+	if err != nil {
+		log.Fatalln("server start error: ", err)
+	}
 	log.Println("listen: ", l.Addr().String())
-	addr <- l.Addr().String()
+
+	// XDial 用 proto@addr 格式定义连接
+	registry.Heartbeat(registryAddr, "tcp@"+l.Addr().String(), 0)
+	wg.Done()
 	server.Accept(l)
-	//server.HandleHTTP()
-	//// 这里直接用 http 的原因是 http 自带的 ServerMux handler
-	//_ = http.Serve(l, nil)
 }
 
 func foo(xc *xclient.XClient, ctx context.Context, typ, method string, args *Args) {
@@ -61,8 +78,8 @@ func foo(xc *xclient.XClient, ctx context.Context, typ, method string, args *Arg
 	}
 }
 
-func call(addr1, addr2 string) {
-	d := xclient.NewMultiDiscovery([]string{"tcp@" + addr1, "tcp@" + addr2})
+func call(registryPath string) {
+	d := xclient.NewGeeMultiDiscovery(registryPath, 0)
 	xc := xclient.NewXClient(d, xclient.RandomSelect, nil)
 	defer func() { _ = xc.Close() }()
 	var wg sync.WaitGroup
@@ -76,8 +93,8 @@ func call(addr1, addr2 string) {
 	wg.Wait()
 }
 
-func broadcast(addr1, addr2 string) {
-	d := xclient.NewMultiDiscovery([]string{"tcp@" + addr1, "tcp@" + addr2})
+func broadcast(registryPath string) {
+	d := xclient.NewGeeMultiDiscovery(registryPath, 0)
 	xc := xclient.NewXClient(d, xclient.RandomSelect, nil)
 	defer func() { _ = xc.Close() }()
 	var wg sync.WaitGroup
@@ -96,16 +113,20 @@ func broadcast(addr1, addr2 string) {
 
 func main() {
 	log.SetFlags(0)
-	ch1 := make(chan string)
-	ch2 := make(chan string)
-	go startServer(ch1)
-	go startServer(ch2)
 
-	addr1 := <-ch1
-	addr2 := <-ch2
+	registryServer := "http://localhost:9999/_geerpc/registry"
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go startRegistry(&wg)
+	wg.Wait()
+
+	wg.Add(2)
+	go startServer(registryServer, &wg)
+	go startServer(registryServer, &wg)
+	wg.Wait()
 
 	time.Sleep(time.Second)
-	call(addr1, addr2)
-	broadcast(addr1, addr2)
+	call(registryServer)
+	broadcast(registryServer)
 	// 当发送间隔过快的话，会出现粘包
 }
