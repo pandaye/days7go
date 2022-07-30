@@ -1,6 +1,7 @@
 package geerpc
 
 import (
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -125,10 +126,27 @@ func HandleHTTP() {
 
 func (s *Server) ServeConn(conn io.ReadWriteCloser) {
 	var opt Option
-	if err := json.NewDecoder(conn).Decode(&opt); err != nil {
+
+	var p [4096]byte
+	// get option size
+	_, err := conn.Read(p[:4])
+	optionSize := binary.BigEndian.Uint32(p[:4])
+	if err != nil {
+		log.Println("Get optionSize error", err)
+		return
+	}
+	// get option
+	_, err = conn.Read(p[:optionSize])
+	if err != nil {
+		log.Println("Get option error", err)
+		return
+	}
+
+	if err := json.Unmarshal(p[:optionSize], &opt); err != nil {
 		log.Println("Get Option error")
 		return
 	}
+
 	if opt.MagicNumber != DefaultOption.MagicNumber {
 		log.Println("Not Option")
 		return
@@ -150,7 +168,7 @@ func (s *Server) serveCodec(c codec.Codec, timeout time.Duration) {
 			if req == nil {
 				break
 			}
-			log.Println("rpc server: accept error:", err)
+			log.Println("rpc server accept error ->", err)
 			s.sendResponse(c, req.h, invalidRequest, sending) // 是否需要在头中写入 Error
 			break
 		}
@@ -167,7 +185,7 @@ func (s *Server) sendResponse(c codec.Codec, header *codec.Header, resp interfac
 
 	err := c.Write(header, resp)
 	if err != nil {
-		panic(err) //
+		log.Println("send response error -> ", err.Error())
 	}
 }
 
@@ -207,6 +225,7 @@ func (s *Server) readRequest(c codec.Codec) (req *request, err error) {
 		if err != io.EOF && err != io.ErrUnexpectedEOF {
 			log.Println("rpc server: read header error:", err)
 		}
+		fmt.Println("EEE", err)
 		return nil, err
 	}
 	req = &request{h: &h}

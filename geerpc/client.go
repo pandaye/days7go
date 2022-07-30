@@ -3,6 +3,7 @@ package geerpc
 import (
 	"bufio"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -158,9 +159,20 @@ type newClientFunc func(conn net.Conn, opt *Option) (*Client, error)
 
 func newClient(conn net.Conn, opt *Option) (*Client, error) {
 	// 发送 option
-	if err := json.NewEncoder(conn).Encode(opt); err != nil {
-		log.Println("error while sending option json")
+	if jsonBuf, err := json.Marshal(opt); err != nil {
 		return nil, err
+	} else {
+		size := uint32(len(jsonBuf))
+		optionSize := [4]byte{}
+		binary.BigEndian.PutUint32(optionSize[:], size)
+		_, err = conn.Write(optionSize[:])
+		if err != nil {
+			return nil, err
+		}
+		if _, err := conn.Write(jsonBuf); err != nil {
+			log.Println("error while sending option json")
+			return nil, err
+		}
 	}
 
 	f := codec.NewCodecFuncMap[opt.CodecType]
